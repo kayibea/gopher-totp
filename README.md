@@ -19,7 +19,7 @@ Expires in: 13s | Code: 944-391
 
 ## GNU Pass Integration
 
-You can pipe a TOTP secret stored in [pass](www.passwordstore.org) directly into `gopher-totp`:
+You can pipe a TOTP secret stored in [pass](https://www.passwordstore.org) directly into `gopher-totp`:
 
 ```bash
 pass show totp/example.com | sed -n '1p' | gopher-totp
