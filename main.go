@@ -90,7 +90,7 @@ func main() {
 			currentCode = totp(secret, totpMod, now)
 			codeStr = fmt.Sprintf("%0*d", digits, currentCode)
 
-			if clipboardOk && codeStr != "" {
+			if clipboardOk {
 				clipboard.Write(
 					clipboard.FmtText,
 					[]byte(codeStr),
