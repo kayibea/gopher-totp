@@ -7,11 +7,11 @@ import (
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
-	"golang.design/x/clipboard"
 	"os"
-	"strconv"
 	"strings"
 	"time"
+
+	"golang.design/x/clipboard"
 )
 
 const (
@@ -19,15 +19,9 @@ const (
 	digits = 6
 )
 
-var totpMod uint32 = 1
+const totpMod uint32 = 1_000_000
 
-func init() {
-	for range digits {
-		totpMod *= 10
-	}
-}
-
-func totp(secret []byte, t time.Time) uint32 {
+func totp(secret []byte, mod uint32, t time.Time) uint32 {
 	counter := uint64(t.Unix() / step)
 
 	var buf [8]byte
@@ -43,7 +37,7 @@ func totp(secret []byte, t time.Time) uint32 {
 		(uint32(sum[offset+2])&0xff)<<8 |
 		(uint32(sum[offset+3]) & 0xff)
 
-	return bin % totpMod
+	return bin % mod
 }
 
 func printUsage() {
@@ -77,6 +71,7 @@ func main() {
 
 	var clipboardOk bool = true
 	var lastCounter uint64 = ^uint64(0)
+	var codeStr string
 	var currentCode uint32
 
 	err = clipboard.Init()
@@ -92,23 +87,21 @@ func main() {
 
 		if counter != lastCounter {
 			lastCounter = counter
-			currentCode = totp(secret, now)
+			currentCode = totp(secret, totpMod, now)
+			codeStr = fmt.Sprintf("%0*d", digits, currentCode)
 
-			if clipboardOk {
+			if clipboardOk && codeStr != "" {
 				clipboard.Write(
 					clipboard.FmtText,
-					[]byte(strconv.FormatUint(uint64(currentCode), 10)),
+					[]byte(codeStr),
 				)
 			}
-
 		}
 
 		remaining := step - int(now.Unix()%step)
-
-		codeStr := fmt.Sprintf("%0*d", digits, currentCode)
 		readable := fmt.Sprintf("%s-%s", codeStr[:3], codeStr[3:])
-		fmt.Printf("\rExpires in: %2ds | Code: %s", remaining, readable)
 
+		fmt.Printf("\rExpires in: %2ds | Code: %s", remaining, readable)
 		os.Stdout.Sync()
 
 		time.Sleep(1 * time.Second)
