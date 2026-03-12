@@ -13,8 +13,10 @@ import (
 	"hash"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.design/x/clipboard"
@@ -122,8 +124,60 @@ func readInput() (string, error) {
 	return strings.TrimSpace(input), nil
 }
 
-func main() {
+func runTOTPGenerator(secret []byte, digits, period int, algo algoType, clip, pretty bool) {
+	var clipboardOK bool
 
+	if clip {
+		if err := clipboard.Init(); err != nil {
+			fmt.Fprintf(os.Stderr, "Clipboard unavailable: %v\n", err)
+		} else {
+			clipboardOK = true
+		}
+	}
+
+	mod := uint32(1)
+	for i := 0; i < digits; i++ {
+		mod *= 10
+	}
+
+	var lastStep int64 = -1
+	var displayCode string
+
+	for {
+		now := time.Now()
+		step := now.Unix() / int64(period)
+		remaining := period - int(now.Unix()%int64(period))
+
+		if step != lastStep {
+			bin := generateHOTP(secret, uint64(step), algo)
+			otp := bin % mod
+
+			code := fmt.Sprintf("%0*d", digits, otp)
+
+			if clip && clipboardOK {
+				clipboard.Write(clipboard.FmtText, []byte(code))
+			}
+
+			displayCode = formatCode(code, pretty)
+			lastStep = step
+		}
+
+		fmt.Printf("\rExpires in: %2ds | Code: %s", remaining, displayCode)
+		time.Sleep(time.Second)
+	}
+}
+
+func setupSignalHandler() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		fmt.Println()
+		os.Exit(0)
+	}()
+}
+
+func main() {
 	digits := flag.Int("digits", 6, "")
 	flag.IntVar(digits, "d", 6, "")
 
@@ -156,19 +210,25 @@ func main() {
 		return
 	}
 
+	setupSignalHandler()
+
 	flagSet := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) {
 		flagSet[f.Name] = true
 	})
 
 	if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) != 0 {
-		fmt.Fprintln(os.Stderr, "No secret provided on stdin")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "Enter Base32 secret or otpauth URI (press Enter to generate):")
 	}
 
 	input, err := readInput()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to read secret")
+		os.Exit(1)
+	}
+
+	if input == "" {
+		fmt.Fprintln(os.Stderr, "Error: No secret or URI provided")
 		os.Exit(1)
 	}
 
@@ -191,7 +251,6 @@ func main() {
 	}
 
 	if uri != nil {
-
 		if uri.digits != 0 && !flagSet["digits"] && !flagSet["d"] {
 			*digits = uri.digits
 		}
@@ -213,6 +272,7 @@ func main() {
 	}
 
 	clean := strings.ToUpper(strings.ReplaceAll(input, " ", ""))
+	clean = strings.TrimRight(clean, "=")
 
 	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(clean)
 	if err != nil {
@@ -220,47 +280,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	var clipboardOK bool
-
-	if *clip {
-		if err := clipboard.Init(); err != nil {
-			fmt.Fprintf(os.Stderr, "Clipboard unavailable: %v\n", err)
-		} else {
-			clipboardOK = true
-		}
-	}
-
-	mod := uint32(1)
-	for i := 0; i < *digits; i++ {
-		mod *= 10
-	}
-
-	var lastStep int64 = -1
-	var displayCode string
-
-	for {
-
-		now := time.Now()
-		step := now.Unix() / int64(*period)
-		remaining := *period - int(now.Unix()%int64(*period))
-
-		if step != lastStep {
-
-			bin := generateHOTP(secret, uint64(step), algoType(strings.ToLower(*algo)))
-			otp := bin % mod
-
-			code := fmt.Sprintf("%0*d", *digits, otp)
-
-			if *clip && clipboardOK {
-				clipboard.Write(clipboard.FmtText, []byte(code))
-			}
-
-			displayCode = formatCode(code, *pretty)
-			lastStep = step
-		}
-
-		fmt.Printf("\rExpires in: %2ds | Code: %s", remaining, displayCode)
-
-		time.Sleep(time.Second)
-	}
+	runTOTPGenerator(secret, *digits, *period, algoType(strings.ToLower(*algo)), *clip, *pretty)
 }
